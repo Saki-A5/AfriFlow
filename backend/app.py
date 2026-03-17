@@ -5,7 +5,9 @@ from flask_cors import CORS
 from models import db, User, Trade, TrustScore, EscrowAccount, Dispute, Evidence, TradeHistory
 from trust_score import calculate_and_update_trust_score, get_trust_profile
 from dispute_ai import analyze_dispute_with_ai
+from id_verification import verify_id_document, analyze_general_image
 import os
+import json
 import jwt
 import datetime
 from functools import wraps
@@ -68,10 +70,248 @@ def login():
     return jsonify({'error': 'Invalid credentials'}), 401
 
 
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """
+    Multi-part registration endpoint.
+    Accepts multipart/form-data so the ID document can be uploaded in one request.
+
+    Required fields: name, email, password, business_name, phone, location, country
+    Optional fields: business_type, registration_number, products_traded,
+                     city, whatsapp, website, id_document_type, reg_document
+    Files: id_document (required for verification), reg_document (optional)
+    """
+    # Support both JSON (step-by-step) and multipart (with documents)
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        data = request.form
+    else:
+        data = request.get_json() or {}
+
+    # ── Validate required fields ──────────────
+    required = ['name', 'email', 'password', 'business_name', 'phone', 'location', 'country']
+    missing  = [f for f in required if not data.get(f, '').strip()]
+    if missing:
+        return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
+
+    if len(data.get('password', '')) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    if User.query.filter_by(email=data['email'].lower().strip()).first():
+        return jsonify({'error': 'An account with this email already exists'}), 409
+
+    # ── Handle document uploads ───────────────
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    id_doc_path  = None
+    reg_doc_path = None
+
+    if 'id_document' in request.files:
+        f = request.files['id_document']
+        if f and f.filename and allowed_file(f.filename):
+            fname      = secure_filename(f'id_{data["email"].replace("@","_")}_{f.filename}')
+            id_doc_path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+            f.save(id_doc_path)
+
+    if 'reg_document' in request.files:
+        f = request.files['reg_document']
+        if f and f.filename and allowed_file(f.filename):
+            fname       = secure_filename(f'reg_{data["email"].replace("@","_")}_{f.filename}')
+            reg_doc_path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
+            f.save(reg_doc_path)
+
+    # ── Create user ───────────────────────────
+    user = User(
+        name                = data['name'].strip(),
+        email               = data['email'].lower().strip(),
+        business_name       = data['business_name'].strip(),
+        business_type       = data.get('business_type', 'General Trade').strip(),
+        registration_number = data.get('registration_number', '').strip() or None,
+        products_traded     = data.get('products_traded', '').strip() or None,
+        phone               = data['phone'].strip(),
+        whatsapp            = data.get('whatsapp', '').strip() or None,
+        location            = data['location'].strip(),
+        city                = data.get('city', '').strip() or None,
+        country             = data['country'].strip(),
+        website             = data.get('website', '').strip() or None,
+        id_document_path    = id_doc_path,
+        id_document_type    = data.get('id_document_type', '').strip() or None,
+        reg_document_path   = reg_doc_path,
+        verification_status = 'pending',
+        profile_complete    = True,
+        avatar_initials     = data['business_name'][:2].upper(),
+    )
+    user.set_password(data['password'])
+
+    # ── AI ID Verification ────────────────────
+    id_result = None
+    if id_doc_path:
+        print(f"[Register] Running AI ID verification for {data['name']}...")
+        id_result = verify_id_document(
+            file_path     = id_doc_path,
+            declared_type = data.get('id_document_type', 'national_id'),
+            owner_name    = data['name'].strip(),
+        )
+        user.id_verification_result     = json.dumps(id_result)
+        user.id_verification_confidence = id_result.get('confidence')
+        user.id_verification_flags      = ','.join(id_result.get('flags', []))
+        user.id_name_extracted          = id_result.get('name_on_document')
+
+        if id_result.get('passed'):
+            user.verification_status = 'verified'
+            print(f"[Register] ID verified — confidence {id_result.get('confidence')}%")
+        else:
+            user.verification_status = 'pending'
+            user.verification_notes  = id_result.get('rejection_reason', '')
+            print(f"[Register] ID not verified — {id_result.get('rejection_reason')}")
+    else:
+        user.verification_status = 'pending'
+
+    db.session.add(user)
+    db.session.flush()   # get user.id before commit
+
+    # ── Generate Trade ID ─────────────────────
+    country_code  = _country_code(user.country)
+    user.trade_id = f'AFR-{country_code}-{str(user.id).zfill(5)}'
+
+    # ── Bootstrap Trust Score ─────────────────
+    trust = TrustScore(
+        user_id          = user.id,
+        overall_score    = 50.0,
+        previous_score   = 50.0,
+        score_trajectory = 'insufficient_data',
+        score_source     = 'initial',
+        score_reasoning  = 'New business — no trade history yet. Score will update after first completed trade.',
+    )
+    db.session.add(trust)
+    db.session.commit()
+
+    token = jwt.encode({
+        'user_id': user.id,
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+    }, app.config['SECRET_KEY'], algorithm='HS256')
+
+    return jsonify({
+        'token':             token,
+        'user':              user.to_dict(),
+        'id_verification':   id_result,
+        'message':           'Account created successfully. Your Trade Profile is live.'
+    }), 201
+
+
+def _country_code(country: str) -> str:
+    """Maps country name to 2-letter code for Trade ID generation."""
+    codes = {
+        'nigeria': 'NG', 'ghana': 'GH', 'kenya': 'KE',
+        'south africa': 'ZA', 'ethiopia': 'ET', 'tanzania': 'TZ',
+        'uganda': 'UG', 'rwanda': 'RW', 'senegal': 'SN',
+        'ivory coast': 'CI', "côte d'ivoire": 'CI',
+        'cameroon': 'CM', 'egypt': 'EG', 'morocco': 'MA',
+        'zimbabwe': 'ZW', 'zambia': 'ZM', 'mozambique': 'MZ',
+    }
+    return codes.get(country.lower().strip(), 'AF')
+
+
 @app.route('/api/auth/me', methods=['GET'])
 @token_required
 def get_me(current_user):
     return jsonify({'user': current_user.to_dict()})
+
+
+# ─────────────────────────────────────────
+# IMAGE VERIFICATION (public endpoints)
+# Called from frontend before/after upload
+# for instant AI feedback.
+# ─────────────────────────────────────────
+
+@app.route('/api/verify/id', methods=['POST'])
+def verify_id_preflight():
+    """
+    Public endpoint — pre-flight ID verification during registration.
+    Called immediately when user selects their ID file so they get
+    instant feedback before submitting the full registration form.
+
+    Accepts: multipart/form-data with:
+      - file         : image file
+      - document_type: passport | national_id | drivers_license | voters_card
+      - owner_name   : full name of the document holder
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    f = request.files['file']
+    if not f or not f.filename or not allowed_file(f.filename):
+        return jsonify({'error': 'Invalid file. Upload a JPEG, PNG, or GIF photo of your ID.'}), 400
+
+    declared_type = request.form.get('document_type', 'national_id')
+    owner_name    = request.form.get('owner_name', 'Unknown')
+
+    # Save temporarily
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    tmp_filename = secure_filename(f'preflight_id_{f.filename}')
+    tmp_path     = os.path.join(app.config['UPLOAD_FOLDER'], tmp_filename)
+    f.save(tmp_path)
+
+    result = verify_id_document(
+        file_path     = tmp_path,
+        declared_type = declared_type,
+        owner_name    = owner_name,
+    )
+
+    # Clean up temp file — the real one is saved during full registration
+    try:
+        os.remove(tmp_path)
+    except Exception:
+        pass
+
+    return jsonify({
+        'verification': result,
+        'model':        'llama-3.2-11b-vision-preview',
+    })
+
+
+@app.route('/api/verify/image', methods=['POST'])
+def analyze_image():
+    """
+    Public endpoint — general image analysis.
+    Used for:
+      - Dispute evidence preview (before submitting)
+      - Shipment photo verification
+      - Any uploaded image that needs AI analysis
+
+    Accepts: multipart/form-data with:
+      - file   : image file
+      - context: what this image relates to
+      - purpose: what this image is supposed to show
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    f = request.files['file']
+    if not f or not f.filename or not allowed_file(f.filename):
+        return jsonify({'error': 'Invalid file type'}), 400
+
+    context = request.form.get('context', 'a business trade')
+    purpose = request.form.get('purpose', 'evidence submission')
+
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    tmp_filename = secure_filename(f'analysis_{f.filename}')
+    tmp_path     = os.path.join(app.config['UPLOAD_FOLDER'], tmp_filename)
+    f.save(tmp_path)
+
+    result = analyze_general_image(
+        file_path = tmp_path,
+        context   = context,
+        purpose   = purpose,
+    )
+
+    try:
+        os.remove(tmp_path)
+    except Exception:
+        pass
+
+    return jsonify({
+        'analysis': result,
+        'model':    'llama-3.2-11b-vision-preview',
+    })
 
 
 # ─────────────────────────────────────────
@@ -368,31 +608,47 @@ def submit_evidence(current_user, dispute_id):
     if trade.buyer_id != current_user.id and trade.supplier_id != current_user.id:
         return jsonify({'error': 'Not authorized'}), 403
 
-    data = request.get_json() or {}
     file_path = None
 
-    if 'file' in request.files:
-        file = request.files['file']
-        if file and allowed_file(file.filename):
-            filename = secure_filename(f'evidence_{dispute_id}_{current_user.id}_{file.filename}')
-            file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(file_path)
+    # ── Multipart form (image upload) ──────────────────────
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        content      = request.form.get('content', '')
+        evidence_type = request.form.get('evidence_type', 'image')
+
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and file.filename and allowed_file(file.filename):
+                filename  = secure_filename(f'evidence_{dispute_id}_{current_user.id}_{file.filename}')
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+                file.save(file_path)
+                print(f"[Upload] Image saved: {file_path}")
+            else:
+                return jsonify({'error': 'Invalid or unsupported file type'}), 400
+    # ── JSON body (text evidence) ───────────────────────────
+    else:
+        data          = request.get_json() or {}
+        content       = data.get('content', '')
+        evidence_type = data.get('evidence_type', 'text')
+
+    if not content and not file_path:
+        return jsonify({'error': 'Evidence content or file is required'}), 400
 
     evidence = Evidence(
-        dispute_id=dispute_id,
-        submitted_by=current_user.id,
-        evidence_type=data.get('evidence_type', 'text'),
-        content=data.get('content', ''),
-        file_path=file_path
+        dispute_id    = dispute_id,
+        submitted_by  = current_user.id,
+        evidence_type = evidence_type,
+        content       = content,
+        file_path     = file_path
     )
     db.session.add(evidence)
 
-    all_evidence = Evidence.query.filter_by(dispute_id=dispute_id).count()
-    if all_evidence >= 1:
+    # Mark ready for review once at least one item submitted
+    if dispute.status == 'pending_evidence':
         dispute.status = 'ready_for_review'
 
     log_trade_history(current_user.id, dispute.trade_id, 'evidence_submitted',
-                      f'Evidence submitted for dispute.')
+                      f'Evidence submitted for dispute ({evidence_type}).')
 
     db.session.commit()
     return jsonify({'evidence': evidence.to_dict(), 'dispute': dispute.to_dict()}), 201
@@ -425,10 +681,14 @@ def run_ai_review(current_user, dispute_id):
         evidence_list=all_evidence
     )
 
-    dispute.ai_confidence = result['confidence']
-    dispute.ai_finding = result['finding']
-    dispute.ai_recommendation = result['recommendation']
+    dispute.ai_confidence      = result['confidence']
+    dispute.ai_finding         = result['finding']
+    dispute.ai_recommendation  = result['recommendation']
     dispute.ai_resolution_type = result['resolution_type']
+    dispute.ai_visual_findings = json.dumps(result.get('visual_findings', []))
+    dispute.ai_visual_impact   = result.get('visual_evidence_impact', 'none')
+    dispute.ai_vision_model    = result.get('vision_model')
+    dispute.ai_text_model      = result.get('text_model')
 
     if result['confidence'] >= 85:
         dispute.status = 'auto_resolved'
@@ -530,6 +790,6 @@ def log_trade_history(user_id, trade_id, event_type, description):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-        from seed import seed_demo_data
-        seed_demo_data()
+        print("[AfriFlow] Database tables created.")
+        print("[AfriFlow] API running at http://localhost:5000")
     app.run(debug=True, port=5000)

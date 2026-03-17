@@ -1,5 +1,3 @@
-// FILE: frontend/src/api/client.js
-
 import axios from 'axios';
 
 const api = axios.create({
@@ -8,10 +6,14 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' }
 });
 
-const token = localStorage.getItem('afriflow_token');
-if (token) {
-  api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-}
+// ✅ Runs before EVERY request — always picks up the latest token
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('afriflow_token');
+  if (token) {
+    config.headers['Authorization'] = `Bearer ${token}`;
+  }
+  return config;
+});
 
 api.interceptors.response.use(
   res => res,

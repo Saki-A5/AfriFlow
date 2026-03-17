@@ -1,44 +1,30 @@
 // FILE: frontend/src/pages/Landing.js
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 export default function Landing() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
+  const [form, setForm]     = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showManual, setShowManual] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [error, setError]   = useState('');
 
   if (user) {
     navigate('/my-trades');
     return null;
   }
 
-  const handleDemoLogin = async (email) => {
-    setLoading(true);
-    setError('');
-    try {
-      await login(email, 'demo1234');
-      navigate('/my-trades');
-    } catch (e) {
-      setError('Demo login failed. Make sure the backend is running.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleManualLogin = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
     try {
       await login(form.email, form.password);
       navigate('/my-trades');
-    } catch (e) {
-      setError('Invalid credentials.');
+    } catch {
+      setError('Invalid email or password.');
     } finally {
       setLoading(false);
     }
@@ -54,15 +40,15 @@ export default function Landing() {
           </div>
           <span className="font-bold text-white text-xl">AfriFlow</span>
         </div>
-        <span className="text-xs text-gray-600 border border-border px-3 py-1 rounded-full">
-          Hackathon POC
-        </span>
+        <Link to="/register"
+          className="text-sm text-brand-400 hover:text-brand-300 font-medium transition-colors">
+          Create Trade Profile →
+        </Link>
       </nav>
 
       <div className="flex-1 flex flex-col lg:flex-row">
         {/* Left — Hero */}
         <div className="flex-1 flex flex-col justify-center px-8 lg:px-20 py-16">
-          {/* Tag */}
           <div className="inline-flex items-center gap-2 bg-brand-500/10 border border-brand-500/20 rounded-full px-4 py-1.5 w-fit mb-8">
             <div className="w-1.5 h-1.5 rounded-full bg-brand-500 pulse-soft" />
             <span className="text-brand-400 text-xs font-medium">Pan-African Trade Trust Infrastructure</span>
@@ -74,11 +60,10 @@ export default function Landing() {
           </h1>
 
           <p className="text-gray-400 text-lg max-w-xl leading-relaxed mb-12">
-            AfriFlow is the trust layer for African cross-border commerce.
-            Verified identities. Protected escrow. AI-powered reputation that compounds with every trade.
+            AfriFlow gives your business a verified Trade Profile, smart escrow protection,
+            and an AI-powered reputation score that grows with every deal you close.
           </p>
 
-          {/* Feature pills */}
           <div className="flex flex-wrap gap-3 mb-12">
             {[
               { icon: '🔐', label: 'Smart Escrow' },
@@ -86,19 +71,19 @@ export default function Landing() {
               { icon: '📊', label: 'Trust Score Engine' },
               { icon: '🌍', label: 'Cross-Border Ready' },
             ].map(f => (
-              <div key={f.label} className="flex items-center gap-2 bg-panel border border-border rounded-full px-4 py-2 text-sm text-gray-300">
+              <div key={f.label}
+                className="flex items-center gap-2 bg-panel border border-border rounded-full px-4 py-2 text-sm text-gray-300">
                 <span>{f.icon}</span>
                 <span>{f.label}</span>
               </div>
             ))}
           </div>
 
-          {/* Stats */}
           <div className="flex gap-8">
             {[
-              { value: '$145T', label: 'Informal B2B market' },
-              { value: '$120B', label: 'Trade finance gap' },
-              { value: '54', label: 'African countries' },
+              { value: '$145T', label: 'Informal B2B market'  },
+              { value: '$120B', label: 'Trade finance gap'    },
+              { value: '54',   label: 'African countries'     },
             ].map(s => (
               <div key={s.label}>
                 <p className="text-2xl font-bold text-brand-400">{s.value}</p>
@@ -109,11 +94,11 @@ export default function Landing() {
         </div>
 
         {/* Right — Login */}
-        <div className="lg:w-[480px] flex items-center justify-center px-8 py-16">
-          <div className="w-full max-w-md space-y-4">
-            <div className="text-center mb-8">
-              <h2 className="text-2xl font-bold text-white">Demo Login</h2>
-              <p className="text-gray-500 text-sm mt-1">Choose a role to experience the full trade flow</p>
+        <div className="lg:w-[440px] flex items-center justify-center px-8 py-16">
+          <div className="w-full max-w-sm space-y-5">
+            <div>
+              <h2 className="text-2xl font-bold text-white">Sign in</h2>
+              <p className="text-gray-500 text-sm mt-1">Access your Trade Profile and trades.</p>
             </div>
 
             {error && (
@@ -122,94 +107,54 @@ export default function Landing() {
               </div>
             )}
 
-            {/* Amaka */}
-            <button
-              onClick={() => handleDemoLogin('amaka@amakaclothing.ng')}
-              disabled={loading}
-              className="w-full bg-panel border border-border hover:border-brand-500 rounded-2xl p-5 text-left transition-all group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-brand-500/20 flex items-center justify-center text-brand-400 font-bold text-lg">
-                  AC
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-white">Amaka Clothing Co.</p>
-                    <span className="text-xs bg-blue-900/40 text-blue-400 px-2 py-0.5 rounded-full">Buyer</span>
-                  </div>
-                  <p className="text-sm text-gray-500">Lagos, Nigeria · Textile & Fashion Retail</p>
-                  <p className="text-xs text-gray-600 mt-0.5">amaka@amakaclothing.ng</p>
-                </div>
-                <div className="text-gray-600 group-hover:text-brand-400 transition-colors text-xl">→</div>
-              </div>
-            </button>
-
-            {/* Kwame */}
-            <button
-              onClick={() => handleDemoLogin('kwame@kwametextiles.gh')}
-              disabled={loading}
-              className="w-full bg-panel border border-border hover:border-brand-500 rounded-2xl p-5 text-left transition-all group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-green-500/20 flex items-center justify-center text-green-400 font-bold text-lg">
-                  KA
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-semibold text-white">Kwame Asante Textiles</p>
-                    <span className="text-xs bg-green-900/40 text-green-400 px-2 py-0.5 rounded-full">Supplier</span>
-                  </div>
-                  <p className="text-sm text-gray-500">Accra, Ghana · Fabric & Textile Supply</p>
-                  <p className="text-xs text-gray-600 mt-0.5">kwame@kwametextiles.gh</p>
-                </div>
-                <div className="text-gray-600 group-hover:text-brand-400 transition-colors text-xl">→</div>
-              </div>
-            </button>
-
-            {loading && (
-              <div className="flex justify-center py-2">
-                <div className="flex gap-1.5">
-                  <div className="w-2 h-2 bg-brand-500 rounded-full dot-bounce" />
-                  <div className="w-2 h-2 bg-brand-500 rounded-full dot-bounce" />
-                  <div className="w-2 h-2 bg-brand-500 rounded-full dot-bounce" />
-                </div>
-              </div>
-            )}
-
-            <div className="text-center">
-              <button
-                onClick={() => setShowManual(!showManual)}
-                className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
-              >
-                {showManual ? 'Hide' : 'Manual login'}
-              </button>
-            </div>
-
-            {showManual && (
-              <form onSubmit={handleManualLogin} className="card space-y-4">
-                <input
-                  className="input"
-                  placeholder="Email"
-                  type="email"
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="label">Email</label>
+                <input className="input" type="email" placeholder="you@yourbusiness.com"
                   value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  required autoFocus
                 />
-                <input
-                  className="input"
-                  placeholder="Password"
-                  type="password"
+              </div>
+              <div>
+                <label className="label">Password</label>
+                <input className="input" type="password" placeholder="Your password"
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                  required
                 />
-                <button type="submit" className="btn-primary w-full text-center" disabled={loading}>
-                  Login
-                </button>
-              </form>
-            )}
+              </div>
+              <button type="submit" disabled={loading}
+                className="btn-primary w-full text-center py-3.5 text-base disabled:opacity-50">
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-2 h-2 bg-white rounded-full dot-bounce" />
+                    <div className="w-2 h-2 bg-white rounded-full dot-bounce" />
+                    <div className="w-2 h-2 bg-white rounded-full dot-bounce" />
+                  </span>
+                ) : 'Sign In →'}
+              </button>
+            </form>
 
-            <p className="text-center text-xs text-gray-700">
-              Password for both accounts: <span className="font-mono text-gray-500">demo1234</span>
-            </p>
+            <div className="text-center space-y-1 pt-2">
+              <p className="text-sm text-gray-500">
+                New to AfriFlow?{' '}
+                <Link to="/register" className="text-brand-400 hover:text-brand-300 font-medium">
+                  Create your Trade Profile
+                </Link>
+              </p>
+            </div>
+
+            {/* Trust indicators */}
+            <div className="border-t border-border pt-5 space-y-2">
+              {[
+                '🔒 Your data is encrypted and stored securely',
+                '✓ Verified businesses only — ID required',
+                '🌍 Active in Nigeria, Ghana, Kenya and more',
+              ].map(line => (
+                <p key={line} className="text-xs text-gray-600">{line}</p>
+              ))}
+            </div>
           </div>
         </div>
       </div>
