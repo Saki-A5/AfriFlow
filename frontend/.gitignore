@@ -29,7 +29,7 @@ __pycache__/
 *.pyc
 
 # Env
-.env
+.env.example
 
 # Uploads
 backend/uploads/
