@@ -21,10 +21,16 @@ MAC_KEY = "secret"
 
 app = Flask(__name__)
 # CORS must include scheme (https://) to match browser Origin exactly.
-CORS(app, origins=[
-    "http://localhost:3000",
-    "https://afri-flow-ytlu.vercel.app",
-])
+# Also scope it to `/api/*` since that's what the frontend calls.
+CORS(
+    app,
+    resources={r"/api/*": {"origins": [
+        "http://localhost:3000",
+        "https://afri-flow-ytlu.vercel.app",
+    ]}},
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'afriflow.db')
@@ -41,6 +47,11 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf', 'gif'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({'ok': True})
 
 def token_required(f):
     @wraps(f)

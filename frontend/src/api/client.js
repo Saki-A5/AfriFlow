@@ -5,7 +5,7 @@ import axios from 'axios';
 // - local:   REACT_APP_API_URL=http://localhost:5000
 // - render:  REACT_APP_API_URL=https://afriflow-f5df.onrender.com
 const API_BASE_URL =
-  process.env.REACT_APP_API_URL || 'https://afriflow-f5df.onrender.com';
+  process.env.REACT_APP_API_URL || 'https://afriflow-1.onrender.com';
 
 // Backend routes are mounted under `/api/*` (e.g. `/api/auth/login`).
 // So the axios client should point at the backend root + `/api`.
