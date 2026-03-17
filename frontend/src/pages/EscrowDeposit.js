@@ -18,17 +18,43 @@ export default function EscrowDeposit() {
   }, [tradeId]);
 
   const handleDeposit = async () => {
-    setLoading(true);
-    try {
-      const res = await api.post(`/trades/${tradeId}/deposit`, { payment_method: payMethod });
-      setReference(res.data.reference);
-      setDeposited(true);
-    } catch (e) {
-      alert(e.response?.data?.error || 'Deposit failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  try {
+    const res = await api.post(`/trades/${tradeId}/deposit`, { payment_method: payMethod });
+    const { gateway_url, payload } = res.data;
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = gateway_url;
+
+    Object.entries(payload).forEach(([key, value]) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = key;
+      input.value = value;
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+    form.submit();
+
+  } catch (e) {
+    alert(e.response?.data?.error || 'Deposit failed.');
+    setLoading(false);
+  }
+};
+
+// Handle return from Interswitch
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  const paymentStatus = params.get('payment');
+  if (paymentStatus === 'success') {
+    setDeposited(true);
+    setReference(params.get('txnref') || '');
+  } else if (paymentStatus === 'failed') {
+    alert('Payment failed. Please try again.');
+  }
+}, []);
 
   if (!data) return <div className="flex justify-center py-20"><div className="flex gap-1.5"><div className="w-2 h-2 bg-brand-500 rounded-full dot-bounce" /><div className="w-2 h-2 bg-brand-500 rounded-full dot-bounce" /><div className="w-2 h-2 bg-brand-500 rounded-full dot-bounce" /></div></div>;
 

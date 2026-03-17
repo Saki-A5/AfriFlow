@@ -1,6 +1,6 @@
 # FILE: backend/app.py
 
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, redirect
 from flask_cors import CORS
 from models import db, User, Trade, TrustScore, EscrowAccount, Dispute, Evidence, TradeHistory
 from trust_score import calculate_and_update_trust_score, get_trust_profile
@@ -10,6 +10,12 @@ import jwt
 import datetime
 from functools import wraps
 from werkzeug.utils import secure_filename
+import hashlib
+import requests
+
+INTERSWITCH_PAY_URL = "https://sandbox.interswitchng.com/collections/w/pay"
+VERIFY_URL = "https://sandbox.interswitchng.com/collections/api/v1/gettransaction.json"
+MAC_KEY = "secret"
 
 app = Flask(__name__)
 CORS(app, origins="*")
@@ -72,6 +78,77 @@ def login():
 @token_required
 def get_me(current_user):
     return jsonify({'user': current_user.to_dict()})
+
+
+@app.route('/api/trades/<int:trade_id>/deposit', methods=['POST'])
+@token_required
+def deposit_escrow(current_user, trade_id):
+    trade = Trade.query.get_or_404(trade_id)
+    if trade.buyer_id != current_user.id:
+        return jsonify({'error': 'Not authorized'}), 403
+    if trade.status != 'accepted':
+        return jsonify({'error': 'Trade must be accepted before deposit'}), 400
+
+    escrow = EscrowAccount.query.filter_by(trade_id=trade_id).first()
+    if not escrow:
+        return jsonify({'error': 'Escrow account not found'}), 404
+
+    amount_kobo = int(escrow.amount * 100)
+    txn_ref = f'AFR-{trade_id}-{int(datetime.datetime.utcnow().timestamp())}'
+
+    # Save reference before redirecting
+    escrow.reference = txn_ref
+    db.session.commit()
+
+    # Generate SHA-512 hash
+    raw = f"{txn_ref}{escrow.pay_item_id}{amount_kobo}{MAC_KEY}"
+    hash_val = hashlib.sha512(raw.encode()).hexdigest()
+
+    payload = {
+        "merchantcode": escrow.merchant_code,
+        "payitemid": escrow.pay_item_id,
+        "txnref": txn_ref,
+        "amount": str(amount_kobo),
+        "currency": "566",
+        "site_redirect_url": f"http://localhost:5000/api/trades/{trade_id}/payment-callback",
+        "hash": hash_val,
+    }
+
+    return jsonify({"gateway_url": INTERSWITCH_PAY_URL, "payload": payload})
+
+
+@app.route('/api/trades/<int:trade_id>/payment-callback', methods=['GET', 'POST'])
+def payment_callback(trade_id):
+    txn_ref = request.args.get('txnref') or request.form.get('txnref')
+
+    trade = Trade.query.get_or_404(trade_id)
+    escrow = EscrowAccount.query.filter_by(trade_id=trade_id).first()
+    amount_kobo = int(escrow.amount * 100)
+
+    # Verify with Interswitch
+    raw = f"{txn_ref}{escrow.pay_item_id}{amount_kobo}{MAC_KEY}"
+    hash_val = hashlib.sha512(raw.encode()).hexdigest()
+ 
+    response = requests.get(VERIFY_URL, headers={"Hash": hash_val}, params={
+        "merchantcode": escrow.merchant_code,
+        "transactionreference": txn_ref,
+        "amount": str(amount_kobo),
+    })
+    result = response.json()
+
+    if result.get("ResponseCode") == "00":
+        escrow.status = 'funded'
+        trade.status = 'funded'
+        trade.updated_at = datetime.datetime.utcnow()
+        log_trade_history(trade.buyer_id, trade.id, 'escrow_funded',
+                          f'₦{escrow.amount:,.0f} deposited to escrow. Ref: {txn_ref}')
+        log_trade_history(trade.supplier_id, trade.id, 'escrow_funded_notify',
+                          f'Funds secured in escrow. Ship goods within {trade.delivery_days} days.')
+        db.session.commit()
+        return redirect(f"http://localhost:3000/trade/{trade_id}/deposit?payment=success&txnref={txn_ref}")
+    else:
+        return redirect(f"http://localhost:3000/trade/{trade_id}/deposit?payment=failed")
+
 
 
 # ─────────────────────────────────────────
@@ -157,8 +234,8 @@ def create_trade(current_user):
         amount=float(data['amount']),
         currency=data.get('currency', 'NGN'),
         status='awaiting_deposit',
-        merchant_code='MX153376',
-        pay_item_id='5558761'
+        merchant_code='MX6072',      
+        pay_item_id='9405967'        
     )
     db.session.add(escrow)
 
@@ -190,37 +267,6 @@ def accept_trade(current_user, trade_id):
 
     db.session.commit()
     return jsonify({'trade': trade.to_dict()})
-
-
-@app.route('/api/trades/<int:trade_id>/deposit', methods=['POST'])
-@token_required
-def deposit_escrow(current_user, trade_id):
-    trade = Trade.query.get_or_404(trade_id)
-    if trade.buyer_id != current_user.id:
-        return jsonify({'error': 'Not authorized'}), 403
-    if trade.status != 'accepted':
-        return jsonify({'error': 'Trade must be accepted before deposit'}), 400
-
-    escrow = EscrowAccount.query.filter_by(trade_id=trade_id).first()
-    if not escrow:
-        return jsonify({'error': 'Escrow account not found'}), 404
-
-    data = request.get_json() or {}
-    reference = f'AFR-{trade_id}-{int(datetime.datetime.utcnow().timestamp())}'
-
-    escrow.status = 'funded'
-    escrow.reference = reference
-    trade.status = 'funded'
-    trade.updated_at = datetime.datetime.utcnow()
-
-    log_trade_history(current_user.id, trade.id, 'escrow_funded',
-                      f'₦{escrow.amount:,.0f} deposited to escrow. Ref: {reference}')
-    log_trade_history(trade.supplier_id, trade.id, 'escrow_funded_notify',
-                      f'Funds secured in escrow. Ship goods within {trade.delivery_days} days.')
-
-    db.session.commit()
-    return jsonify({'trade': trade.to_dict(), 'escrow': escrow.to_dict(), 'reference': reference})
-
 
 @app.route('/api/trades/<int:trade_id>/shipment', methods=['POST'])
 @token_required
