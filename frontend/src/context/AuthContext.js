@@ -20,7 +20,7 @@ export function AuthProvider({ children }) {
     } else {
       setLoading(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = async (email, password) => {
     const res = await api.post('/auth/login', { email, password });
