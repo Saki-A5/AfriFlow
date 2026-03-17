@@ -1,14 +1,14 @@
 import axios from 'axios';
 
-const API_URL = "https://afriflow-f5df.onrender.com";
-
-fetch({API_URL}/api/data.json)
-  .then(res => res.json())
-  .then(data => console.log(data))
-  .catch(err => console.error(err));
+// Prefer configuring this in `.env` as REACT_APP_API_URL for local/dev/prod parity.
+// Example:
+// - local:   REACT_APP_API_URL=http://localhost:5000
+// - render:  REACT_APP_API_URL=https://afriflow-f5df.onrender.com
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || 'https://afriflow-f5df.onrender.com';
 
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || '/api',
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' }
 });
