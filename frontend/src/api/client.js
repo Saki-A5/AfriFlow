@@ -1,7 +1,18 @@
 import axios from 'axios';
 
+// Prefer configuring this in `.env` as REACT_APP_API_URL for local/dev/prod parity.
+// Example:
+// - local:   REACT_APP_API_URL=http://localhost:5000
+// - render:  REACT_APP_API_URL=https://afriflow-f5df.onrender.com
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || 'https://afriflow-f5df.onrender.com';
+
+// Backend routes are mounted under `/api/*` (e.g. `/api/auth/login`).
+// So the axios client should point at the backend root + `/api`.
+const API_ROOT = `${API_BASE_URL.replace(/\/+$/, '')}/api`;
+
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || '/api',
+  baseURL: API_ROOT,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' }
 });

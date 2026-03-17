@@ -1,4 +1,4 @@
-backend/venv
-.venv
+uploads/
+venv
 backend/.env
 backend/afriflow.db

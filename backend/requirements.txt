@@ -8,6 +8,7 @@ PyJWT==2.8.0
 groq==0.9.0
 python-dotenv==1.0.1
 gunicorn==22.0.0
+requests==2.32.3
 ## The following requirements were added by pip freeze:
 annotated-types==0.7.0
 anyio==4.12.1
