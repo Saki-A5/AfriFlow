@@ -20,7 +20,10 @@ VERIFY_URL = "https://sandbox.interswitchng.com/collections/api/v1/gettransactio
 MAC_KEY = "secret"
 
 app = Flask(__name__)
-CORS(app, origins="*")
+CORS(app, origins=[
+    "http://localhost:3000",
+    "afri-flow-ytlu.vercel.app"
+])
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'afriflow.db')
